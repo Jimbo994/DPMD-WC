@@ -21,8 +21,8 @@ op_module = tf.load_op_library(module_path + "deepmd/libop_abi.so")
 
 # load grad of force module
 sys.path.append (module_path )
-import deepmd._prod_force_grad
-import deepmd._prod_virial_grad
+import deepmd._prod_force_norot_grad
+import deepmd._prod_virial_norot_grad
 
 def load_graph(frozen_graph_filename, 
                prefix = 'load'):
@@ -61,10 +61,13 @@ def analyze_ntype (graph) :
             names.append (int(f1_fs[-1]))
     s_name = sorted(set(names))
     assert len(s_name)-1 == s_name[-1], "the type is not an seq, unexpected"
-    return len(s_name)
+    return len(s_name) + 1 #+1 for extra type for Wannier centers, we do not build an atomic net so we need one extra.
 
 def l2err (diff) :
     return np.sqrt(np.average (diff*diff))
+
+def mae (diff):
+    return np.average(np.absolute(diff))
 
 def test (sess, data, numb_test = None, detail_file = None) :
     graph = sess.graph
@@ -132,6 +135,33 @@ def test (sess, data, numb_test = None, detail_file = None) :
     print ("Force  L2err        : %e eV/A" % l2f)
     print ("Virial L2err        : %e eV" % l2v)
     print ("Virial L2err/Natoms : %e eV" % l2va)
+
+    mae_e = (mae (energy - test_energy[:numb_test]))
+    mae_f = (mae (force  - test_force [:numb_test]))
+    force_diff = []
+    for i in range(numb_test):
+        f_diff = force[i][:576] - test_force[i][:576]
+        force_diff.append(f_diff)
+    #print(len(force_diff))
+    #print(len(force_diff[0]))
+    mae_f_part = mae(force_diff)
+    #mae_f_part =  (mae(force[:][:576]  - test_force[:numb_test][:576]))
+    mae_v = (mae (virial - test_virial[:numb_test]))
+    mae_ea= mae_e/natoms_vec[0]
+    mae_ea_part = mae_e/(natoms_vec[0]*3/7)
+    mae_va= mae_v/natoms_vec[0]
+    mae_va_part= mae_v/(natoms_vec[0]*3/7)
+    
+    # print ("# energies: %s" % energy)
+    print ("# number of test data : %d " % numb_test)
+    print ("Energy MAE          : %e eV" % mae_e)
+    print ("Energy MAE/Natoms   : %e eV" % mae_ea)
+    print ("Energy MAE/atomsonly: %e eV" % mae_ea_part)
+    print ("Force  MAE          : %e eV/A" % mae_f)
+    print ("Force atomsonly MAE : %e eV/A" % mae_f_part)
+    print ("Virial MAE          : %e eV" % mae_v)
+    print ("Virial MAE/Natoms   : %e eV" % mae_va)
+    print ("Virial MAE/atomsonly: %e eV" % mae_va_part)
 
     if detail_file is not None :
         pe = np.concatenate((np.reshape(test_energy[:numb_test], [-1,1]),

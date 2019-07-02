@@ -713,7 +713,8 @@ get_ntypes () const
       assert (myntypes == orc(0));
     }
   }
-  return myntypes;
+  return myntypes + 1;
+  //return myntypes;
 }
 
 void

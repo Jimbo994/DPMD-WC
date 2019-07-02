@@ -115,11 +115,12 @@ public:
       }      
 
       // compute grad of one frame
-      for (int ii = 0; ii < nloc; ++ii){
+      for (int ii = 0; ii < nloc * 3/7; ++ii){
 	int i_idx = ii;
 	
 	// deriv wrt center atom
-	for (int aa = 0; aa < ndescrpt; ++aa){
+	//for (int aa = 0; aa < ndescrpt; ++aa){
+	for (int aa = ndescrpt * 3/7; aa < ndescrpt; ++aa){
 	  for (int dd = 0; dd < 3; ++dd){
 	    grad_net (grad_net_iter + i_idx * ndescrpt + aa) -= grad (grad_iter + i_idx * 3 + dd) * in_deriv (in_iter + i_idx * ndescrpt * 3 + aa * 3 + dd);
 	  }
@@ -129,7 +130,7 @@ public:
 	for (int jj = 0; jj < nnei; ++jj){
 	  int j_idx = nlist (nlist_iter + i_idx * nnei + jj);	  
 	  if (j_idx > nloc) j_idx = j_idx % nloc;
-	  if (j_idx < 0) continue;
+	  if (j_idx < 0 || j_idx > 192) continue;
 	  int aa_start, aa_end;
 	  make_descript_range (aa_start, aa_end, jj);
 	  for (int aa = aa_start; aa < aa_end; ++aa){

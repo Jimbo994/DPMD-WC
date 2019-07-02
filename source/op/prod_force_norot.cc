@@ -2,6 +2,7 @@
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
 #include <iostream>
+#include <fstream>
 
 using namespace tensorflow;
 using namespace std;
@@ -99,6 +100,20 @@ class ProdForceNorotOp : public OpKernel {
     assert (nnei * 4 == ndescrpt);	    
     
     // loop over samples
+    // this stuff prints example.txt to check the dimensions of nloc and nall
+    ofstream myfile;
+    myfile.open("example.txt");
+    myfile << "natoms: " << natoms << '\n';
+    myfile << "nloc: " << nloc << '\n';
+    myfile << "nall: " << nall << '\n';
+    myfile << "ndescrpt: " << ndescrpt << '\n';
+    myfile << "nnei: " << nnei << '\n';
+    myfile << "net_deriv size: " << net_deriv.size() << '\n';
+    myfile << "in_deriv size: " << in_deriv.size() << '\n';
+    myfile << "nlist size: " << nlist.size() << '\n';
+    myfile << "nlist: " << nlist;
+    myfile.close();
+                                                     
 #pragma omp parallel for
     for (int kk = 0; kk < nframes; ++kk){
       int force_iter	= kk * nall * 3;
@@ -106,6 +121,7 @@ class ProdForceNorotOp : public OpKernel {
       int in_iter	= kk * nloc * ndescrpt * 3;
       int nlist_iter	= kk * nloc * nnei;
 
+      // Should I also divide over 3 here?
       for (int ii = 0; ii < nall; ++ii){
 	int i_idx = ii;
 	force (force_iter + i_idx * 3 + 0) = 0;
@@ -114,10 +130,12 @@ class ProdForceNorotOp : public OpKernel {
       }
 
       // compute force of a frame
-      for (int ii = 0; ii < nloc; ++ii){
+      //for (int ii = 0; ii < nloc; ++ii){
+      for (int ii = 0; ii < nloc * 3/7; ++ii){
 	int i_idx = ii;	
 	// deriv wrt center atom
-	for (int aa = 0; aa < ndescrpt; ++aa){
+	//for (int aa = 0; aa < ndescrpt; ++aa){
+	for (int aa = ndescrpt * 3/7; aa < ndescrpt; ++aa){
 	  force (force_iter + i_idx * 3 + 0) -= net_deriv (net_iter + i_idx * ndescrpt + aa) * in_deriv (in_iter + i_idx * ndescrpt * 3 + aa * 3 + 0);
 	  force (force_iter + i_idx * 3 + 1) -= net_deriv (net_iter + i_idx * ndescrpt + aa) * in_deriv (in_iter + i_idx * ndescrpt * 3 + aa * 3 + 1);
 	  force (force_iter + i_idx * 3 + 2) -= net_deriv (net_iter + i_idx * ndescrpt + aa) * in_deriv (in_iter + i_idx * ndescrpt * 3 + aa * 3 + 2);
@@ -126,7 +144,7 @@ class ProdForceNorotOp : public OpKernel {
 	for (int jj = 0; jj < nnei; ++jj){
 	  int j_idx = nlist (nlist_iter + i_idx * nnei + jj);
 	  // if (j_idx > nloc) j_idx = j_idx % nloc;
-	  if (j_idx < 0) continue;
+	  if (j_idx < 0 || j_idx > 192) continue;
 	  int aa_start, aa_end;
 	  make_descript_range (aa_start, aa_end, jj);
 	  for (int aa = aa_start; aa < aa_end; ++aa) {
@@ -136,6 +154,11 @@ class ProdForceNorotOp : public OpKernel {
 	  }
 	}
       }
+          ofstream myfile2;
+          myfile2.open("force.txt");
+          myfile2 << "forces size" << force.size() << '\n';
+          myfile2 << "forces" << force << '\n';
+          myfile2.close();
     }
   }
 private:

@@ -819,7 +819,10 @@ class NNPModel (object):
 
         atom_ener_reshape = tf.reshape (atom_ener, [-1])
         atom_ener_hat_reshape = tf.reshape (atom_ener_hat, [-1])
-        l2_atom_ener_loss = tf.reduce_mean (tf.square(atom_ener_hat_reshape - atom_ener_reshape), name = "l2_atom_ener_" + suffix)
+
+	# CHANGE BELONGING TO ONLY BUILDING O-ATOMNET
+#        l2_atom_ener_loss = tf.reduce_mean (tf.square(atom_ener_hat_reshape - atom_ener_reshape), name = "l2_atom_ener_" + suffix)
+        l2_atom_ener_loss = tf.reduce_mean (tf.square(atom_ener_hat_reshape - atom_ener_hat_reshape), name = "l2_atom_ener_" + suffix)
 
         atom_norm  = 1./ global_cvt_2_tf_float(natoms[0]) 
         atom_norm_ener  = 1./ global_cvt_2_ener_float(natoms[0]) 
@@ -881,18 +884,25 @@ class NNPModel (object):
                                      sel_a = self.sel_a,
                                      sel_r = self.sel_r,
                                      axis_rule = self.axis_rule)
-
+        # Dimensions: natoms[0] * ndescrpt (448 * 1288)
         descrpt_reshape = tf.reshape(descrpt, [-1, self.ndescrpt])
-        
+ #       self._message("Dimension Check descrpt_reshape %s" % descrpt_reshape.get_shape().as_list())
+ #       self._message("ndescrpt %s" % self.ndescrpt)
         atom_ener = self.build_atom_net (nframes, descrpt_reshape, natoms, bias_atom_e = bias_atom_e, reuse = reuse)
+        #np.savetxt('test_eners.out', atom_ener, delimiter=',')
 
-        energy_raw = tf.reshape(atom_ener, [-1, natoms[0]], name = 'atom_energy_'+suffix)
+	#CHANGE BELONGING TO ONLY BUILDING O-ATOMNET
+#        energy_raw = tf.reshape(atom_ener, [-1, natoms[0]], name = 'atom_energy_'+suffix)
+        # Dimensions: 192
+        energy_raw = tf.reshape(atom_ener, [-1, natoms[0]*3/7], name = 'atom_energy_'+suffix)
         energy = tf.reduce_sum(global_cvt_2_ener_float(energy_raw), axis=1, name='energy_'+suffix)
-
-        net_deriv_tmp = tf.gradients (atom_ener, descrpt_reshape)
+ 
+        net_deriv_tmp = tf.gradients(atom_ener, descrpt_reshape)
         net_deriv = net_deriv_tmp[0]
         net_deriv_reshape = tf.reshape (net_deriv, [-1, natoms[0] * self.ndescrpt])
-
+        # Dimensions: natoms[0] * ndescrpt (448 * 1288)
+        #self._message("Dimension Check inputs DS for net_deriv %s" %  net_deriv_reshape.get_shape().as_list())
+ 
         if self.use_smooth :
             force = op_module.prod_force_norot (net_deriv_reshape,
                                                 descrpt_deriv,
@@ -941,48 +951,55 @@ class NNPModel (object):
                         bias_atom_e = None,
                         reuse = None) :
         start_index = 0
+        # Note: inputs = descrpt_reshape 
         inputs = tf.reshape(inputs, [-1, self.ndescrpt * natoms[0]])
+        self._message("Dimension Check inputs %s" %  inputs.get_shape().as_list())
         shape = inputs.get_shape().as_list()
         if bias_atom_e is not None :
             assert(len(bias_atom_e) == self.ntypes)
-
+        # CHANGE BELONGING TO ONLY BUILDING O ATOMNET (BREAK OUT IF STATEMENTS TO RETRIEVE ORIGINAL) 
+        # HERE I slice out only first 192 atom of descript_reshape still containing all ndescrpt.
         for type_i in range(self.ntypes):
-            # cut-out inputs
-            inputs_i = tf.slice (inputs,
+            if type_i == 0 or type_i == 1:
+                # cut-out inputs
+                inputs_i = tf.slice (inputs,
                                  [ 0, start_index*      self.ndescrpt],
                                  [-1, natoms[2+type_i]* self.ndescrpt] )
-            inputs_i = tf.reshape(inputs_i, [-1, self.ndescrpt])
-            start_index += natoms[2+type_i]
-            if bias_atom_e is None :
-                type_bias_ae = 0.0
-            else :
-                type_bias_ae = bias_atom_e[type_i]
-
-            # compute atom energy
-            if self.use_smooth :
-                if self.type_fitting_net :
-                    layer = self._DS_layer_type_ext(inputs_i, name='DS_layer_type_'+str(type_i), natoms=natoms, reuse=reuse, seed = self.seed)
+                inputs_i = tf.reshape(inputs_i, [-1, self.ndescrpt])
+                self._message("Dimension Check inputs_i %s" %  inputs_i.get_shape().as_list())
+ 
+                start_index += natoms[2+type_i]
+                if bias_atom_e is None :
+                    type_bias_ae = 0.0
                 else :
-                    layer = self._DS_layer(inputs_i, name='DS_layer_type_'+str(type_i), natoms=natoms, reuse=reuse, seed = self.seed)
-                for ii in range(0,len(self.n_neuron)) :
-                    if ii >= 1 and self.n_neuron[ii] == self.n_neuron[ii-1] :
-                        layer+= self._one_layer(layer, self.n_neuron[ii], name='layer_'+str(ii)+'_type_'+str(type_i), reuse=reuse, seed = self.seed, use_timestep = self.resnet_dt)
+                    type_bias_ae = bias_atom_e[type_i]
+
+                # compute atom energy
+                if self.use_smooth :
+                    if self.type_fitting_net :
+                        layer = self._DS_layer_type_ext(inputs_i, name='DS_layer_type_'+str(type_i), natoms=natoms, reuse=reuse, seed = self.seed)
                     else :
+                        layer = self._DS_layer(inputs_i, name='DS_layer_type_'+str(type_i), natoms=natoms, reuse=reuse, seed = self.seed)
+                    for ii in range(0,len(self.n_neuron)) :
+                        if ii >= 1 and self.n_neuron[ii] == self.n_neuron[ii-1] :
+                            layer+= self._one_layer(layer, self.n_neuron[ii], name='layer_'+str(ii)+'_type_'+str(type_i), reuse=reuse, seed = self.seed, use_timestep = self.resnet_dt)
+                        else :
+                            layer = self._one_layer(layer, self.n_neuron[ii], name='layer_'+str(ii)+'_type_'+str(type_i), reuse=reuse, seed = self.seed)
+                else :
+                    layer = self._one_layer(inputs_i, self.n_neuron[0], name='layer_0_type_'+str(type_i), reuse=reuse, seed = self.seed)
+                    for ii in range(1,len(self.n_neuron)) :
                         layer = self._one_layer(layer, self.n_neuron[ii], name='layer_'+str(ii)+'_type_'+str(type_i), reuse=reuse, seed = self.seed)
-            else :
-                layer = self._one_layer(inputs_i, self.n_neuron[0], name='layer_0_type_'+str(type_i), reuse=reuse, seed = self.seed)
-                for ii in range(1,len(self.n_neuron)) :
-                    layer = self._one_layer(layer, self.n_neuron[ii], name='layer_'+str(ii)+'_type_'+str(type_i), reuse=reuse, seed = self.seed)
-            final_layer = self._one_layer(layer, 1, activation_fn = None, bavg = type_bias_ae, name='final_layer_type_'+str(type_i), reuse=reuse, seed = self.seed)
-            final_layer = tf.reshape(final_layer, [nframes, natoms[2+type_i]])
-            # final_layer = tf.cond (tf.equal(natoms[2+type_i], 0), lambda: tf.zeros((0, 0), dtype=global_tf_float_precision), lambda : tf.reshape(final_layer, [-1, natoms[2+type_i]]))
+                final_layer = self._one_layer(layer, 1, activation_fn = None, bavg = type_bias_ae, name='final_layer_type_'+str(type_i), reuse=reuse, seed = self.seed)
+                final_layer = tf.reshape(final_layer, [nframes, natoms[2+type_i]])
+                # final_layer = tf.cond (tf.equal(natoms[2+type_i], 0), lambda: tf.zeros((0, 0), dtype=global_tf_float_precision), lambda : tf.reshape(final_layer, [-1, natoms[2+type_i]]))
 
-            # concat the results
-            if type_i == 0:
-                outs = final_layer
-            else:
-                outs = tf.concat([outs, final_layer], axis = 1)
-
+                # concat the results
+                if type_i == 0:
+                    outs = final_layer
+                else:
+                   outs = tf.concat([outs, final_layer], axis = 1)
+            if type_i ==2:
+                continue
 
         return tf.reshape(outs, [-1])
 
@@ -996,6 +1013,7 @@ class NNPModel (object):
                    reuse=None,
                    seed=None, 
                    use_timestep = False):
+        self._message("Type Check  %s" %  str(activation_fn))
         with tf.variable_scope(name, reuse=reuse):
             shape = inputs.get_shape().as_list()
             w = tf.get_variable('matrix', 
@@ -1044,56 +1062,80 @@ class NNPModel (object):
         outputs_size = [1] + self.filter_neuron
         outputs_size_2 = self.n_axis_neuron
         with tf.variable_scope(name, reuse=reuse):
-          start_index = 0
+#          start_index = 0
+#          xyz_scatter_total = []
+#          for type_i in range(self.ntypes):
+            # cut-out inputs
+            # with natom x (nei_type_i x 4)  
+#            inputs_i = tf.slice (inputs,
+#                                 [ 0, start_index*      4],
+#                                 [-1, self.sel_a[type_i]* 4] )
+#            start_index += self.sel_a[type_i]
+#            shape_i = inputs_i.get_shape().as_list()
+######## My proposed adjustments to ignore O-O interactions ########
+            # to skip O-O interaction we just do not allow space for it
+          #start_index = 0
+          start_index = self.sel_a[0] + self.sel_a[1]
           xyz_scatter_total = []
           for type_i in range(self.ntypes):
             # cut-out inputs
-            # with natom x (nei_type_i x 4)  
-            inputs_i = tf.slice (inputs,
-                                 [ 0, start_index*      4],
+            # with natom x (nei_type_i x 4) 
+            #if type_i == 0:
+            #    continue
+            if type_i == 2: # or type_i == 0:
+                inputs_i = tf.slice (inputs,
+                                 [ 0, start_index*     4],
                                  [-1, self.sel_a[type_i]* 4] )
-            start_index += self.sel_a[type_i]
-            shape_i = inputs_i.get_shape().as_list()
-            # with (natom x nei_type_i) x 4  
-            inputs_reshape = tf.reshape(inputs_i, [-1, 4])
-            xyz_scatter = tf.reshape(tf.slice(inputs_reshape, [0,0],[-1,1]),[-1,1])
-            for ii in range(1, len(outputs_size)):
-              w = tf.get_variable('matrix_'+str(ii)+'_'+str(type_i), 
-                                [outputs_size[ii - 1], outputs_size[ii]], 
-                                global_tf_float_precision,
-                                tf.random_normal_initializer(stddev=stddev/np.sqrt(outputs_size[ii]+outputs_size[ii-1]), seed = seed))
-              b = tf.get_variable('bias_'+str(ii)+'_'+str(type_i), 
-                                [1, outputs_size[ii]], 
-                                global_tf_float_precision,
-                                tf.random_normal_initializer(stddev=stddev, mean = bavg, seed = seed))
-              if self.filter_resnet_dt :
-                  idt = tf.get_variable('idt_'+str(ii)+'_'+str(type_i), 
-                                        [1, outputs_size[ii]], 
-                                        global_tf_float_precision,
-                                        tf.random_normal_initializer(stddev=0.001, mean = 1.0, seed = seed))
-              if outputs_size[ii] == outputs_size[ii-1]:
-                  if self.filter_resnet_dt :
-                      xyz_scatter += activation_fn(tf.matmul(xyz_scatter, w) + b) * idt
-                  else :
-                      xyz_scatter += activation_fn(tf.matmul(xyz_scatter, w) + b)
-              elif outputs_size[ii] == outputs_size[ii-1] * 2: 
-                  if self.filter_resnet_dt :
-                      xyz_scatter = tf.concat([xyz_scatter,xyz_scatter], 1) + activation_fn(tf.matmul(xyz_scatter, w) + b) * idt
-                  else :
-                      xyz_scatter = tf.concat([xyz_scatter,xyz_scatter], 1) + activation_fn(tf.matmul(xyz_scatter, w) + b)
-              else:
-                  xyz_scatter = activation_fn(tf.matmul(xyz_scatter, w) + b)
-            # natom x nei_type_i x out_size
-            xyz_scatter = tf.reshape(xyz_scatter, (-1, shape_i[1]//4, outputs_size[-1]))
-            xyz_scatter_total.append(xyz_scatter)
+                start_index += self.sel_a[type_i]
+                shape_i = inputs_i.get_shape().as_list()
+########### End adjustments ##########################################
+                # with (natom x nei_type_i) x 4  
+                inputs_reshape = tf.reshape(inputs_i, [-1, 4])
+                self._message("Dimension Check inputs DS %s" %  inputs_i.get_shape().as_list())
+
+                xyz_scatter = tf.reshape(tf.slice(inputs_reshape, [0,0],[-1,1]),[-1,1])
+                for ii in range(1, len(outputs_size)):
+                    w = tf.get_variable('matrix_'+str(ii)+'_'+str(type_i), 
+                                    [outputs_size[ii - 1], outputs_size[ii]], 
+                                    global_tf_float_precision,
+                                    tf.random_normal_initializer(stddev=stddev/np.sqrt(outputs_size[ii]+outputs_size[ii-1]), seed = seed))
+                    b = tf.get_variable('bias_'+str(ii)+'_'+str(type_i), 
+                                    [1, outputs_size[ii]], 
+                                    global_tf_float_precision,
+                                    tf.random_normal_initializer(stddev=stddev, mean = bavg, seed = seed))
+                    if self.filter_resnet_dt :
+                        idt = tf.get_variable('idt_'+str(ii)+'_'+str(type_i), 
+                                            [1, outputs_size[ii]], 
+                                            global_tf_float_precision,
+                                            tf.random_normal_initializer(stddev=0.001, mean = 1.0, seed = seed))
+                    if outputs_size[ii] == outputs_size[ii-1]:
+                        if self.filter_resnet_dt :
+                            xyz_scatter += activation_fn(tf.matmul(xyz_scatter, w) + b) * idt
+                        else :
+                            xyz_scatter += activation_fn(tf.matmul(xyz_scatter, w) + b)
+                    elif outputs_size[ii] == outputs_size[ii-1] * 2: 
+                        if self.filter_resnet_dt :
+                            xyz_scatter = tf.concat([xyz_scatter,xyz_scatter], 1) + activation_fn(tf.matmul(xyz_scatter, w) + b) * idt
+                        else :
+                            xyz_scatter = tf.concat([xyz_scatter,xyz_scatter], 1) + activation_fn(tf.matmul(xyz_scatter, w) + b)
+                    else:
+                        xyz_scatter = activation_fn(tf.matmul(xyz_scatter, w) + b)
+                # natom x nei_type_i x out_size
+                xyz_scatter = tf.reshape(xyz_scatter, (-1, shape_i[1]//4, outputs_size[-1]))
+                xyz_scatter_total.append(xyz_scatter)
 
           # natom x nei x outputs_size
           xyz_scatter = tf.concat(xyz_scatter_total, axis=1)
           # natom x nei x 4
-          inputs_reshape = tf.reshape(inputs, [-1, shape[1]//4, 4])
+          #inputs_reshape = tf.reshape(inputs, [-1, shape[1]//4, 4])
+          
+           #ADJUSTED THIS LINE replaced inputs and shape with inputs_i and shape_i respectively and did the trick. 
+          inputs_reshape = tf.reshape(inputs_i, [-1, shape_i[1]//4, 4])
+
+
           # natom x 4 x outputs_size
           xyz_scatter_1 = tf.matmul(inputs_reshape, xyz_scatter, transpose_a = True)
-          xyz_scatter_1 = xyz_scatter_1 * (4.0 / shape[1])
+          xyz_scatter_1 = xyz_scatter_1 * (4.0 / shape_i[1])
           # natom x 4 x outputs_size_2
           xyz_scatter_2 = tf.slice(xyz_scatter_1, [0,0,0],[-1,-1,outputs_size_2])
           # natom x outputs_size x outputs_size_2
